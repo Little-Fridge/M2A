@@ -7,11 +7,11 @@ from ..utils.message import encode_image_to_base64
 class MultimodalEmbedder:
     """Local SigLIP2 image embedding service"""
 
-    def __init__(self, api_key: str, api_base: str, model: str = None):
-        api_base = api_base.rstrip("/")
+    def __init__(self, api_key: str, base_url: str, model: str = None):
+        base_url = base_url.rstrip("/")
         self.client = OpenAI(
             api_key=api_key,
-            base_url=api_base,
+            base_url=base_url,
         )
         if model is None:
             models = client.models.list()
