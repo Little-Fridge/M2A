@@ -4,50 +4,50 @@ import json
 import os
 from dataclasses import dataclass, field, asdict, fields
 from pathlib import Path
-from typing import Type, TypeVar, Any
+from typing import Type, TypeVar, Any, get_type_hints
 
 T = TypeVar("T")
 TIME_FMT = r"%Y-%m-%d %H:%M"
 
+
 def _from_dict(cls: Type[T], data: dict[str, Any]) -> T:
-    known = {f.name: f for f in fields(cls)}
+    hints = get_type_hints(cls)
+    known = {f.name for f in fields(cls)}
     kwargs: dict[str, Any] = {}
     for key, val in data.items():
         if key not in known:
             continue
-        f = known[key]
-
-        if isinstance(val, dict) and hasattr(f.type, "__dataclass_fields__"):
-            val = _from_dict(f.type, val)
+        hint = hints[key]
+        if isinstance(val, dict) and hasattr(hint, "__dataclass_fields__"):
+            val = _from_dict(hint, val)
         kwargs[key] = val
     return cls(**kwargs)
 
+
 def _override_from_env(obj: T, prefix: str) -> T:
+    hints = get_type_hints(type(obj))
     updates: dict[str, Any] = {}
     for f in fields(obj):
-        env_key = f"{prefix}_{f.name.upper()}"
-        raw = os.environ.get(env_key)
+        raw = os.environ.get(f"{prefix}_{f.name.upper()}")
         if raw is None:
             continue
-
-        origin_type = f.type
-
-        if hasattr(origin_type, "__dataclass_fields__"):
+        hint = hints[f.name]
+        if hasattr(hint, "__dataclass_fields__"):
             continue
         try:
-            if origin_type is bool or origin_type == "bool":
+            if hint is bool:
                 updates[f.name] = raw.lower() in ("1", "true", "yes")
-            elif origin_type is int or origin_type == "int":
+            elif hint is int:
                 updates[f.name] = int(raw)
-            elif origin_type is float or origin_type == "float":
+            elif hint is float:
                 updates[f.name] = float(raw)
             else:
                 updates[f.name] = raw
         except (ValueError, TypeError):
-            pass  
+            pass
     if not updates:
         return obj
-    return _from_dict(type(obj), {**asdict(obj), **updates}) 
+    return _from_dict(type(obj), {**asdict(obj), **updates})
 
 
 @dataclass
@@ -63,15 +63,16 @@ class LLMConfig:
 @dataclass
 class TextEmbeddingConfig:
     api_key: str = "EMPTY"
-    api_base: str = "http://localhost:8100/v1"
+    base_url: str = "http://localhost:8100/v1"
     model: str = "text-embedding-3-small"
 
 
 @dataclass
 class MultimodalEmbeddingConfig:
     api_key: str = "EMPTY"
-    api_base: str = "http://localhost:8050/v1"
+    base_url: str = "http://localhost:8050/v1"
     model: str = "siglip2-base-patch16-384"
+
 
 @dataclass
 class MemoryManagerConfig:
@@ -103,55 +104,46 @@ class M2AConfig:
     chat_agent: ChatAgentConfig = field(default_factory=ChatAgentConfig)
     memory_manager: MemoryManagerConfig = field(default_factory=MemoryManagerConfig)
 
+    def _apply_env_overrides(self) -> None:
+        hints = get_type_hints(type(self))
+        for f in fields(self):
+            hint = hints[f.name]
+            if hasattr(hint, "__dataclass_fields__"):
+                prefix = f"M2A_{f.name.upper()}"
+                setattr(self, f.name, _override_from_env(getattr(self, f.name), prefix))
+
     @classmethod
-    def from_env(cls) -> "M2AConfig":
+    def from_env(cls) -> M2AConfig:
         cfg = cls()
-        cfg.llm = _override_from_env(cfg.llm, "M2A_LLM")
-        cfg.text_embedding = _override_from_env(cfg.text_embedding, "M2A_TEXT_EMBEDDING")
-        cfg.multimodal_embedding = _override_from_env(cfg.multimodal_embedding, "M2A_MULTIMODAL_EMBEDDING")
-        cfg.memory = _override_from_env(cfg.memory, "M2A_MEMORY")
-        cfg.evaluation = _override_from_env(cfg.evaluation, "M2A_EVALUATION")
-        cfg.chat_agent = _override_from_env(cfg.chat_agent, "M2A_CHAT_AGENT")
+        cfg._apply_env_overrides()
         return cfg
 
     @classmethod
-    def from_file(cls, config_path: str) -> "M2AConfig":
+    def from_file(cls, config_path: str) -> M2AConfig:
         import tomllib
         path = Path(config_path)
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
-        
-        with open(path, 'rb') as f:
+        with open(path, "rb") as f:
             data = tomllib.load(f)
         return cls._from_dict_nested(data)
 
     @classmethod
-    def from_file_and_env(cls, config_path: str) -> "M2AConfig":
+    def from_file_and_env(cls, config_path: str) -> M2AConfig:
         cfg = cls.from_file(config_path)
-        cfg.llm = _override_from_env(cfg.llm, "M2A_LLM")
-        cfg.text_embedding = _override_from_env(cfg.text_embedding, "M2A_TEXT_EMBEDDING")
-        cfg.multimodal_embedding = _override_from_env(cfg.multimodal_embedding, "M2A_MULTIMODAL_EMBEDDING")
-        cfg.memory = _override_from_env(cfg.memory, "M2A_MEMORY")
-        cfg.evaluation = _override_from_env(cfg.evaluation, "M2A_EVALUATION")
-        cfg.chat_agent = _override_from_env(cfg.chat_agent, "M2A_CHAT_AGENT")
+        cfg._apply_env_overrides()
         return cfg
 
     @classmethod
-    def _from_dict_nested(cls, data: dict) -> "M2AConfig":
-        sub_classes = {
-            "llm": LLMConfig,
-            "text_embedding": TextEmbeddingConfig,
-            "multimodal_embedding": MultimodalEmbeddingConfig,
-            "memory": MemoryConfig,
-            "chat_agent": ChatAgentConfig,
-            "memory_manager": MemoryManagerConfig
-        }
+    def _from_dict_nested(cls, data: dict) -> M2AConfig:
         cfg = cls()
-        for key, sub_cls in sub_classes.items():
-            if key in data:
-                current = asdict(getattr(cfg, key))
-                current.update(data[key]) 
-                setattr(cfg, key, _from_dict(sub_cls, current))
+        hints = get_type_hints(cls)
+        for f in fields(cls):
+            hint = hints[f.name]
+            if hasattr(hint, "__dataclass_fields__") and f.name in data:
+                current = asdict(getattr(cfg, f.name))
+                current.update(data[f.name])
+                setattr(cfg, f.name, _from_dict(hint, current))
         return cfg
 
     def save_to_file(self, config_path: str) -> None:
@@ -162,6 +154,7 @@ class M2AConfig:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
 
 def get_default_config() -> M2AConfig:
     return M2AConfig()
