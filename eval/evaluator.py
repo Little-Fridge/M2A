@@ -2,13 +2,13 @@ import re
 import json
 import math
 import threading
+from tqdm import tqdm
 from queue import Queue
+from typing import Any, TypedDict
 from collections import Counter
-from typing import List, Dict, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from tqdm import tqdm
-from typing import TypedDict
+from .llm_judge import LLMJudge
 
 CATEGORIES = {
     1: "Multi-hop", 2: "Temporal",
@@ -19,8 +19,8 @@ CATEGORIES = {
 
 class Summary(TypedDict):
     total_questions: int
-    overall: Dict[str, float]
-    by_category: Dict[str, Any]
+    overall: dict[str, float]
+    by_category: dict[str, Any]
 
 
 class Evaluator:
@@ -31,9 +31,9 @@ class Evaluator:
 
     def __init__(
         self,
-        methods: List[Any],
-        judge: Optional[Any] = None,
-        database_root_path: str = "/home/dataset-local/usr/yulin/person_agen_3213/Personal_Agent_Dataset"
+        methods: list,
+        judge: LLMJudge,
+        database_root_path: str
     ):
         self.judge = judge
         self.database_root_path = database_root_path
@@ -45,7 +45,7 @@ class Evaluator:
     # --- Metric Calculations ---
 
     @staticmethod
-    def tokenize(text: str) -> List[str]:
+    def tokenize(text: str) -> list[str]:
         """Tokenizes string into lowercase words and CJK characters."""
         text = str(text).lower()
         text = re.sub(r'[\u0000-\u002F\u003A-\u0040\u005B-\u0060\u007B-\u007E]', ' ', text)
@@ -71,7 +71,7 @@ class Evaluator:
         bp = math.exp(1 - len(rt) / len(pt)) if len(pt) < len(rt) else 1.0
         return bp * precision
 
-    def _get_best_metrics(self, pred: str, refs: List[str]) -> Tuple[float, float, str]:
+    def _get_best_metrics(self, pred: str, refs: list[str]) -> tuple[float, float, str]:
         best_f1, best_bleu, best_ref = -1, -1, ""
         for r in refs:
             f1 = self.calculate_f1(pred, r)
@@ -82,11 +82,11 @@ class Evaluator:
 
     # --- Data Normalization ---
 
-    def _norm_imgs(self, imgs: Any) -> List[Any]:
+    def _norm_imgs(self, imgs: Any) -> list:
         if imgs is None: return []
         return [imgs] if isinstance(imgs, (str, dict)) else list(imgs)
 
-    def _norm_refs(self, refs: Any) -> List[str]:
+    def _norm_refs(self, refs: Any) -> list[str]:
         if refs is None: return [""]
         if isinstance(refs, (str, int, float, bool)): return [str(refs)]
         items = [refs] if isinstance(refs, dict) else refs
@@ -101,7 +101,7 @@ class Evaluator:
 
     # --- Data Collection ---
 
-    def _build_dialogue(self, conversation: Dict) -> List[Dict]:
+    def _build_dialogue(self, conversation: dict) -> list[dict]:
         """Flattens session-based conversation into a chronological list."""
         dialogue = []
         idx = 0
@@ -123,7 +123,7 @@ class Evaluator:
             idx += 1
         return dialogue
 
-    def _collect_conversations(self, data: List[Dict]) -> List[Dict]:
+    def _collect_conversations(self, data: list[dict]) -> list[dict]:
         processed = []
         for i, item in enumerate(data):
             qas = []
@@ -149,7 +149,7 @@ class Evaluator:
 
     # --- Summary Calculation ---
 
-    def calc_summary(self, results: Dict, done: int) -> Dict:
+    def calc_summary(self, results: dict, done: int) -> dict:
         """Aggregates metrics into a structured summary."""
         all_items = [x for items in results.values() for x in items]
         judged_items = [x for x in all_items if x['judge_label'] is not None]
@@ -244,7 +244,7 @@ class Evaluator:
 
         return self._aggregate_and_print(all_conv_results)
 
-    def _aggregate_and_print(self, all_conv_results: Dict) -> Dict:
+    def _aggregate_and_print(self, all_conv_results: dict) -> dict:
         merged_results = {}
         for local_results in all_conv_results.values():
             for cat, items in local_results.items():

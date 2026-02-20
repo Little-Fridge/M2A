@@ -45,21 +45,22 @@ def _norm_imgs(imgs):
     return [ _img_from(v) for v in imgs ]
 
 class LLMJudge:
-    def __init__(self, port):
+    def __init__(self, base_url, api_key, model=None):
         from langchain_openai import ChatOpenAI
         from openai import OpenAI
 
-        client = OpenAI(
-            api_key="EMPTY",
-            base_url=f"http://localhost:{port}/v1",
-        )
-        models = client.models.list()
-        model = models.data[0].id
+        if model is None:
+            client = OpenAI(
+                api_key=api_key,
+                base_url=base_url,
+            )
+            models = client.models.list()
+            model = models.data[0].id
 
         self.llm = ChatOpenAI(
             model=model,
-            base_url=f"http://localhost:{port}/v1",
-            api_key="EMPTY",
+            base_url=base_url,
+            api_key=api_key,
         )
         
     def score(self, question, gold, pred, images=None):
