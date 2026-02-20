@@ -6,10 +6,10 @@ from langchain.embeddings.base import Embeddings
 class TextEmbedding(Embeddings):
     """OpenAI text embedding service"""
 
-    def __init__(self, api_key: str, api_base, model: str = "text-embedding-3-small"):
+    def __init__(self, api_key: str, base_url, model: str = "text-embedding-3-small"):
         self.client = OpenAI(
             api_key=api_key,
-            base_url=api_base,
+            base_url=base_url,
         )
         self.model = model
 
